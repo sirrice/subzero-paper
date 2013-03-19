@@ -18,8 +18,11 @@ endef
 main: main.tex main.bib
 	$(__latex_code)
 	cp main.pdf ~/Dropbox/papers/mine/subzero.pdf
+
+cameraready: main
 	pdftops main.pdf
 	ps2pdf14 -dPDFSETTINGS=/prepress main.ps
 
+
 clean:
-	rm -f $(TARGETS) *.out *.log *.aux *~ *.pdf *.bbl
+	rm -f $(TARGETS) *.out *.log *.aux *~ *.pdf *.dvi *.log *.ps *.blg
