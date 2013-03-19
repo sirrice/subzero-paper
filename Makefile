@@ -25,4 +25,4 @@ cameraready: main
 
 
 clean:
-	rm -f $(TARGETS) *.out *.log *.aux *~ *.pdf *.dvi *.log *.ps *.blg
+	rm -f $(TARGETS) *.out *.log *.aux *~ *.pdf *.dvi *.log *.ps *.blg *.bbl
