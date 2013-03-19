@@ -1,0 +1,141 @@
+\section{Data, Lineage and Query Model}
+\label{s:datamodel}
+
+In this section, we describe the representation and notation of lineage 
+data and queries in \sys{}.
+
+\sys{} is designed to work with a workflow executor system that applies a fixed
+sequence of operators to some set of inputs.  Each operator operates
+on one or more input objects (e.g., tables or arrays), and produces a
+single output object.  Formally, we say an operator $P$ takes as input
+$n$ objects, $I_P^1,...,I_P^n$, and outputs a single object, $O_P$.
+
+Multiple operators are composed together to form a workflow, described by a
+workflow specification, which is a directed acyclic graph $W = (N, E)$, where
+$N$ is the set of operators, and $e = (O^P, I^{P'}_i) \in E$ specifies that the
+output of $P$ forms the {\it i'th} input to the operator $P'$.  An instance of
+$W$, $W_j$, executes the workflow on a specific dataset. Each operator runs
+when all of its inputs are available.
+
+The data follows the SciDB data model, which processes multi-dimensional
+arrays.  A combination of values along each dimension, termed a {\it
+coordinate}, uniquely identifies a cell.  Each cell in an array has the same
+schema, and consists of one or more named, typed fields.  SciDB is ``no
+overwrite,'' meaning that intermediate results produced as the output of an
+operator are always stored persistently, and each update to an object creates a
+new, persistent version.  \sys{} stores lineage information
+with each version to speed up lineage queries. 
+
+
+Our notion of backward lineage is defined as a subset of the inputs that will
+reproduce the same output value  if the operator is re-run on its lineage.  For
+example, the lineage of an output cell of Matrix Multiply are all cells of the
+corresponding row and column in the input arrays -- even if some are empty.
+Forward lineage is defined as a subset, $C$, of the outputs such that the
+backward lineage of $C$ contains the input cells.  The exact semantics for UDFs
+are ulitmately controlled by the developer.
+
+%This definition is consistent with other provenance models that assume
+%all-to-all relationships across UDFs.  While this is sufficient for the
+%applications we encountered, enforcing stricter semantics in lineage systems
+%that support UDFs is an important subject of future work.
+
+
+
+
+%Finally, we define the $fanout$($fanin$) of an operator as the average number
+%of output(input) cells that are derived from each input(output) cell. 
+
+%Black-box lineage only stores references to the input and output arrays as
+%each operator is executed.  
+\sys{} supports three types of lineage: {\it black box},  {\it cell-level}, and {\it region}
+lineage.
+As a workflow executes, lineage is generated on an operator-by-operator basis,
+depending on the types of lineage that each operator is instrumented to support
+and the materialization decisions made by the optimizer.  We have instrumented
+SciDB's built-in operators to generate lineage mappings from inputs to
+outputs and provide an API for
+UDF designers to expose these relationships.  If the API is not used, then \sys{}
+assumes an all-to-all relationship between the cells of the input arrays and
+cells of the output array.
+
+
+
+\paragraph{Black-box lineage}\sys{} does not require additional resources to store black-box lineage because, like SciDB,
+our workflow executor records intermediate results as well as input and output array versions
+as peristent, named objects. These are sufficient to re-run any previously executed
+operator from any point in the workflow.
+
+%Black box lineage allows any output cell to be recreated by re-running the
+%operator with the original inputs. % and filtering the lineage that is
+%generated.
+
+\paragraph{Cell-level lineage} Cell-level lineage models the relationships
+between an output cell and each input cell that generated it \footnote{Although
+    we model and refer to lineage as a mapping between input and output cells,
+    in the \sys{} implementation we store these mappings as references to
+physical cell coordinates.} as a set of pairs of input and output cells:
+{\footnotesize $$\{(out,in) | out \in O_P \wedge in \in \cup_{i\in [1,n]} I_P^i
+\}$$ } Here, $out \in O_P$ means that $out$ is a single cell contained in the
+output array $O_P$.  $in$ refers to a single cell in one of the input arrays.
+
+\paragraph{Region lineage} Region lineage 
+models lineage as a set of {\it region pairs}.  Each region pair describes an
+all-to-all lineage relationship between a set of output cells, $outcells$, and
+a set of input cells, $incells_i$, in each input array, $I_P^i$: 
+{\footnotesize
+    $$\{(outcells,incells_1,...,incells_n) | outcells \subseteq O_P
+    \wedge incells_i \subseteq I_P^i\}$$ }
+Region lineage is more than a short hand; scientific applications often exhibit
+locality and generate multiple output cells from the same set of input cells,
+which can be represented by a single region pair.  For example, the LSST star
+detection operator finds clusters of adjacent bright pixels and generates an
+array that labels each pixel with the star that it belongs to.  Every output
+pixel labeled {\it Star X} depends on all of the input pixels in the {\it Star
+X} region.  Automatically tracking such relationships at the cell level  is
+particularly expensive, so region lineage is a generalization of cell-level
+lineage that makes this relationship explicit.  For this reason, later sections
+will exclusively discuss region pairs.
+
+
+
+
+%\subsection{Query Model}
+
+Users execute a lineage query by specifying the coordinates of
+an initial set of query cells, $C$, in a starting array, and a path of
+operators $(P_1 \ldots P_m)$  to trace through the workflow:
+{\footnotesize
+    $$R = execute\_query(C, ((P_1, idx_1),..., (P_m, idx_m)))$$
+}
+Here, the indexes ($idx_1 \ldots idx_m$) are used to disambiguate which input
+of a multi-input operator that the query path traverses.  
+
+Depending on the order of operators in the query path, \sys{} recognizes the
+query as a {\it forward lineage query} or {\it backward lineage query}.  A {\it
+forward lineage query} defines a path from some ancestor operator $P_1$ to some
+descendent operator $P_m$.  The output of an operator $P_{i-1}$ is  the
+$idx_i$'th input of the next operator, $P_i$.  The query cells $C$ are a
+subset of $P_1$'s $idx_1$'th input array, $C \subseteq I_{P_1}^{idx_1}$.
+
+A {\it backward lineage query} reverses this process, defining a path from some
+descendent operator, $P_1$ that terminates at some ancestor operator, $P_m$.
+The output of an operator, $P_{i+1}$ is the $idx_i$'th input of the previous
+operator, $P_i$, and the query cells $C$ are a subset of $P_1$'s output array,
+$C \subseteq O_{P_1}$.  
+The query results are the coordinates of the cells $R \subseteq O_{P_m}$ or $R
+\subseteq I_{P_m}^{idx_m}$, for forward and backward queries, respectively.
+
+
+
+%It is also used when the output of an operator is used
+%as multiple inputs to
+%the same operator (e.g., self-join).  
+
+
+
+
+
+
+
+

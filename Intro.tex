@@ -1,0 +1,147 @@
+\section{Introduction}
+
+Many scientific applications are naturally expressed as a workflow that
+comprises a sequence of operations applied to raw input data to produce an
+output dataset or visualization.  Like database queries, such workflows can be
+quite complex, consisting up to hundreds of operations~\cite{lsst} whose
+parameters or inputs vary from one run to another.  
+
+Scientists record and query provenance -- metadata that describes the
+processes, environment and relationships between input and output data arrays
+-- to ascertain data quality, audit and debug workflows, and more generally
+understand how the output data came to be. A key component of provenance, {\it
+data lineage}, identifies how input data elements are related to output data
+elements and is integral to debugging workflows.  For example, scientists need
+to be able to work backward from the output to identify the sources of an error
+given erroneous or suspicious output results.  Once the source of the error is
+identified, the scientist will then often want to identify derived downstream
+data elements that depend on the erroneous value so he can inspect and possibly
+correct those outputs.  
+
+
+
+In this paper, we describe the design of a fine-grained lineage tracking and
+querying system for array-oriented scientific workflows.  We assume a data and
+execution model similar to SciDB~\cite{scidb}.  We chose this because it
+provides a closed execution environment  that can capture all of the lineage
+information, and because it is specifically designed for scientific data
+processing (scientists typically use RDBMSes to manage metadata and do data
+processing outside of the database).  The system allows scientists to perform
+exploratory workflow debugging by executing a series of {\it data lineage
+queries} that walk backward to identify the specific cells in the input arrays
+on which a given output cell depends and that walk forward to find the output
+cells that a particular input cell influenced.  Such a system must manage input
+to output relationships at a {\it fine-grained} array-cell level.
+
+Prior work in data lineage tracking systems has largely been limited to
+coarse-grained metadata tracking~\cite{taverna,genepattern}, which stores
+relationships at the file or relational table level. {\it Fine-grained lineage}
+tracks relationships at the array cell or tuple level.  The typical approach,
+popularized by Trio~\cite{trio}, which we call {\it cell-level lineage},
+eagerly materializes the identifiers of the input data records (e.g., tuples or
+array cells) that each output record depends on, and  uses it to
+directly answer backward lineage queries. An alternative, which we call {\it
+black-box lineage}, simply records the input and output datasets and runtime
+parameters of each operator as it is executed, and materializes the lineage at
+lineage query time by re-running relevant operators in a tracing mode.
+
+Unfortunately, both techniques are insufficient in scientific
+applications for two reasons. First, scientific applications make heavy use of
+user defined functions (UDFs), whose semantics are opaque to the lineage
+system.  Existing approaches  conservatively assume that every output cell of a
+UDF depends on every input cell, which limits the utility of a fine-grained
+lineage system because it tracks a large amount of information without
+providing any insight into which inputs actually contributed to a given output.
+This necessitates proper APIs so that UDF designers can expose fine-grained
+lineage information and operator semantics to the lineage system.
+
+Second, neither black-box only nor cell-level only techniques are sufficient
+for many applications. Scientific workflows consume data arrays that regularly
+contain millions of cells, while generating complex relationships between
+groups of input and output cells.    Storing cell-level lineage can avoid
+re-running some computationally intensive operators (e.g., an image processing
+operator that detects a small number of stars in telescope imagery), but needs
+enormous amounts of storage if every output depends on every input (e.g., a
+matrix sum operation) -- it may be preferable to recompute the lineage at
+query time.  In addition, applications such as LSST\footnote{http://lsst.org}
+are often subject to  limitations that only allow them to dedicate a
+small percentage of storage to lineage operations.   Ideally, lineage 
+systems would support a hybrid of the two approaches and take user constraints
+into account when deciding which operators to store lineage for.
+
+
+This paper seeks to address both challenges. We interviewed scientists from
+several domains to understand their data processing workflows and  lineage
+needs and used the results to design a science-oriented data lineage system.
+We introduce {\it Region Lineage}, which exploits locality properties prevalent
+in the scientific operators we encountered.  It addresses common relationships
+between regions of input and output cells by storing grouped or summary
+information rather than individual pairs of input and output cells. We
+developed a lineage API that supports black-box lineage as well as {\it Region
+Lineage}, which subsumes cell-level lineage.  Programmers can also specify
+forward/backward {\it Mapping Functions} for an operator to directly
+compute the forward/backward lineage solely from input/output cell coordinates
+and operator arguments; we implemented these for many common matrix and
+statistical functions.  We also developed a hybrid lineage storage
+system that allows users to explicitly trade-off storage space for lineage
+query performance using an optimization framework.  Finally, we introduce two
+end-to-end scientific lineage benchmarks.
+
+As mentioned earlier, the system prototype, \sys{}, is implemented in the
+context of the SciDB model.  SciDB stores multi-dimensional arrays and executes
+database queries composed of built-in and user-defined operators (UDFs) that
+are compiled into workflows.  Given a set of user-specified storage
+constraints, \sys{} uses an optimization framework to choose the optimal type
+of lineage (black box, or one of several new types we propose) for each SciDB
+operator that minimizes lineage query costs while respecting user storage
+constraints.
+
+
+A summary of our contributions include: 
+
+\begin{CompactEnumerate}
+
+\item The notion of {\it region lineage}, which \sys{} uses to efficiently
+    store and query lineage data from scientific applications.  We also
+    introduce several efficient representations and encoding schemes that each
+    have different overhead and query performance trade offs.
+
+\item A {\it lineage API} that operator developers can use to expose lineage
+    from user defined operators, including the specification of {\it mapping
+    functions} for many of the built in SciDB operators.
+
+\item A {\it unified storage model} for mapping functions, region and
+    cell-level lineage, and black-box lineage.
+
+\item An {\it optimization framework} which picks an optimal mixture of
+    black-box and region lineage  to maximize query
+    performance within user defined constraints.
+
+\item A performance evaluation of our approach on end-to-end astronomy and
+    genomics benchmarks.  The astronomy benchmark, which is computationally
+    intensive but exhibits high locality, benefits from efficient
+    representations.  Compared to cell-level and black-box lineage, \sys{}
+    reduces storage overhead by nearly 70$\times$ and speeds query performance
+    by almost 255$\times$.  The genomics benchmark highlights the need for, and
+    benefits of, using an optimizer to pick the storage layout, which improves
+    query performance by 2--3$\times$ while staying within user constraints.
+    
+
+\end{CompactEnumerate}
+
+The next section  describes our motivating use cases in more detail.  It is
+followed by a high level system architecture and details of the rest of the
+system.
+
+
+
+
+
+
+
+
+
+
+
+
+

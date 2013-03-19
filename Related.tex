@@ -1,0 +1,114 @@
+\section{Related Work}
+
+
+%Many of our ideas are
+%inspired by previous work, which we highlight in this section.
+
+
+There is a long history of provenance and lineage research both in database
+systems and in more general workflow systems.   There are several excellent
+surveys that characterize provenance in databases~\cite{provdb} and scientific
+workflows~\cite{provsci,provsci2}.  As noted in the introduction, the primary
+differences from prior work  are that \sys{} uses a mix of black-box and region
+provenance, exploits the semantics of scientific operators (making using of
+mapping functions) and uses a number of provenance encodings.  
+
+Most workflow systems support custom operators containing user-designed code
+that is opaque to the runtime.  This presents a difficulty when trying to
+manage cell-level (e.g., array cells or database tuples) provenance.  Some
+systems~\cite{genepattern,galaxy} model operators as black-boxes where all
+outputs depend on all inputs, and track the dependencies between input and
+output datasets.  Efficient methods to expose, store and query cell-level
+provenance is an area of on-going research.
+
+Several projects exploit workflow systems that use high level programming
+constructs with well defined semantics.  RAMP~\cite{ramp} extends MapReduce to
+automatically generate lineage capturing wrappers around Map and Reduce
+operators.  Similarly, Amsterdamer et al~\cite{lipstick} instrument the
+PIG~\cite{pig} framework to track the lineage of PIG operators.  However,
+ user defined operators are treated as black-boxes, which limits their ability to
+track lineage. 
+
+Other workflow systems (e.g., Taverna~\cite{taverna} and Kepler~\cite{kepler}),
+process nested collections of data, where  data items may be  imagees or DNA
+sequences.  Operators  process  data items in a collection, and these systems
+automatically track which subsets of  the collections were modified, added, or
+removed~\cite{keplerfine,tavernafine}.  Chapman et. al~\cite{chapman} attach
+to each data item a provenance tree of the transformations resulting in the
+data item, and propose efficient compression methods to reduce the tree size.
+However, these systems  model  operators as black-boxes and data items
+are typically files, not records.
+
+Database systems execute queries that process  structured tuples using 
+ well defined relational operators, and are a natural target for a
+lineage system.  Cui et. al~\cite{tracingcui} identified efficient
+tracing procedures for a number of operator properties.  These procedures are
+then used to execute backward lineage queries.  However, the model does not
+allow arbitrary operators to generate lineage, and  models them as
+black-boxes.  Section~\ref{s:storagemodel} describes several mechanisms (e.g.,
+payload functions) that can implement many of these procedures.
+
+Trio~\cite{trio} was the first database implementation of cell-level
+lineage, and unified uncertainty and provenance under a single
+data and query model.  Trio explicitly stores relationships between
+input and output tuples, and is analogous to the full provenance
+approach described in Section \ref{s:storagemodel}.
+
+The \sys{} runtime API is inspired by the PASS~\cite{pass,passv2} provenance
+API.  PASS is a file system that automatically stores provenance information of
+files and processes.  Applications can use  the {\it libpass} library to create
+abstract provenance objects and relationships between them, analagous to
+producing cell-level lineage.  \sys{} extends this API to support the
+semantics of common scientific provenance relationships. 
+
+
+% ExSPAN~\cite{} use declarative networking to record and query the provenance
+% of network protocols.
+
+\if{0}
+\srm{I think you can cut this.}
+{\bf  mention theoretical work?  There's just SO MUCH stuff.  No
+  wonder there's so many surveys}
+There has been a large body of theoretical work. Semirings relates
+provenance to Nested Relational Calculus.  Ibis developed a model and
+query language for hierarchical provenance.  Trio and Cui formalized
+provenance in database systems.  Weakly invertable functions.
+~\cite{semirings,ibis,trio,weakinverse}.
+\fi
+
+% There is an additional large body of work focused on compressing
+% provenance to reduce the storage requirements.  jagadesh, gustavo, rue
+
+% There are a large number of workflow systems that track the provenance
+% at the dataset level (e.g., coarse-grained provenance).  These
+% systems~\cite{kepler,taverna,genepattern} have been adopted by
+% different scientific communities.  Additional systems can be found in
+% the survey~\cite{provdb,provsci}.  \srm{Say how we are different -- repeat what is in
+% intro.  Are you absolutely sure about this claim???}
+
+
+% There has been less work on implementing support for the type of
+% fine-grained provenance described in this paper.
+% Cui~\cite{tracingcui} defined classes of efficient tracing algorithms
+% in the context of warehousing ETL pipelines. Their focus was on
+% classifying various mapping functions.  HOW RELATE TO SUBZERO
+
+
+
+
+% {\bf SRM lots and lots of work on scientific workflows and provenance
+% e.g.:
+
+% \url{http://www.cs.panam.edu/~artem/main/publications/TR-DB-052007-CFLLF.pdf}
+
+% \url{http://daks.ucdavis.edu/~ludaesch/Paper/qlp-ssdbm09.pdf}
+
+
+% (and many more -- google ``scientific workflow provenance'')
+% }
+
+
+% How provenance systems relate to Materialized Views.
+
+% Debugging, program replay, Retro?
+

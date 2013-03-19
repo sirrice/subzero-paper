@@ -1,0 +1,43 @@
+\section{Conclusion}
+
+This paper introduced \sys{}, a scientific-oriented lineage storage and query
+system that stores a mix of black-box and fine-grained lineage.  \sys{} uses an
+optimization framework that picks the lineage representation on a per-operator
+basis that maximizes lineage query performance while staying within user
+constraints.  In addition, we presented {\it region lineage}, which explicitly
+represents lineage relationships between sets of input and output data
+elements, along with a number of efficient encoding schemes.  \sys{} is heavily
+optimized for operators that can deterministically compute lineage from array
+cell coordinates and small amounts of operator-generated metadata.  UDF
+developers expose  lineage relationships and semantics by calling the runtime
+API and/or implementing mapping functions.
+
+Our experiments show that many scientific operators can use our techniques to
+dramatically reduce the amount of redundant lineage that is generated and
+stored to  improve query performance by up to 10$\times$ while using up to
+70$\times$ less storage space as compared to existing cell-based strategies.
+The optimizer successfully scales the amount of lineage stored based on
+application constraints, and can improve the query performance of the genomics
+benchmark, which is amenable to black-box only strategies..  In conclusion,
+\sys{} is an important initial step to make interactively querying 
+fine-grained lineage a reality for scientific applications.
+
+
+%to this general framework,
+%we introduced {\it region provenance}, which encodes provenance between sets of
+%input and output data elements and efficiently captures the locality that many
+%scientific operators exhibit (e.g., a star in LSST is detecting by looking a
+%clusters of adjacent pixels).  We proposed several efficient representations of
+%{\it region provenance} and encoding schemes that trade off storage size and
+%query performance.  \sys{} additionally provides developers an API to write
+%provenance from within user-defined operators.
+
+%Our experiments were based on two real-world benchmarks.  The astronomy
+%benchmark reflects common scientific workflows and shows that our techniques
+%can improve query performance by up to 10$\times$ while requiring 70$\times$
+%less storage space as compared to traditional cell-provenance strategies.  The
+%second genomics benchmark executes the workflow very quickly and generates lots
+%of provenance.  Even though it is more amenable to black-box only strategies,
+%\sys{} is able to optimally use the available storage space and still improve
+%provenance query performance.  
+

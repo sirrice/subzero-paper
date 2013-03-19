@@ -1,0 +1,284 @@
+\section{Lineage API and Storage Model}
+\label{s:storagemodel}
+
+\sys{} allows developers to write operators that efficiently represent and
+store  lineage.  This section describes several modes of region lineage, and an
+API that UDF developers can use to generate lineage from within the operators.  We
+also introduce a mechanism to control the modes of lineage that an operator
+generates.  Finally, we describe how \sys{} re-executes black-box operators
+during a lineage query.  Table \ref{t:api} summarizes the API calls and
+operator methods that are introduced in this section.
+
+Before describing the different lineage storage methods, we illustrate the
+basic structure of an operator:
+
+{\footnotesize
+\begin{alltt}
+class OpName:
+   def run(input-1,...,input-n,cur_modes):
+      /* Process the inputs, emit the output */
+      /* Record lineage modes specified
+         in cur_modes */
+    def supported_modes():
+      /* Return the lineage modes the
+         operator supports */
+\end{alltt}
+}
+
+Each operator implements a {\it run()} method, which is called when inputs are
+available to be processed.  It is passed a list of lineage modes it should
+output in the {\it cur\_modes} argument; it writes out lineage data using
+the {\it lwrite()} method described below.  The developer specifies the modes
+that the operator supports (and that the runtime will consider) by overriding
+the {\it supported\_modes()} method.  If the developer does not override {\it
+supported\_modes()}, \sys{} assumes an all-to-all relationship between the
+inputs and outputs.  Otherwise, the operator automatically supports black-box
+lineage.
+
+
+
+\begin{table}[t!]
+\vspace{-.2in}
+\advance\leftskip-.3in
+\footnotesize
+\caption{Runtime and operator methods}
+%\begin{center}
+  \begin{tabular}{ | l | l  | }
+    \hline
+    {\bf API Method} & {\bf Description} \\ \hline \hline
+    \multicolumn{2}{|c|}{\bf System API Calls} \\ \hline
+    lwrite(outcells, ${\rm incells_1}$, ...,$ {\rm incells_n}$) & API
+    to store lineage relationship.   \\ \hline
+    lwrite(outcells, payload) & API to store small binary payload\\
+                              &instead of input cells.  Called by \\
+			      &payload operators.  \\ \hline
+    \multicolumn{2}{|c|}{\bf Operator Methods} \\ \hline
+    run(input-1,...,input-n,cur\_modes)
+                              & Execute the operator, generating \\
+			      & lineage types in cur\_modes $\subseteq \{Full,$\\
+			      &$Map, Pay, Comp, Blackbox\}$  \\ \hline
+
+    ${\rm map_b}$(outcell, i) & Computes the input cells in ${\rm input_i}$\\
+                              &that contribute to ${\rm outcell}$.\\ \hline
+    ${\rm map_f}$(incell, i) & Computes the output cells that depend\\
+                             &on ${\rm incell} \in {\rm input_i}$. \\ \hline
+    ${\rm map_p}$(outcell, payload, i)
+                             & Computes the input cells in  ${\rm input_i}$ \\
+			     &that contribute to ${\rm outcell}$, has access \\
+			     &to ${\rm payload}$. \\ \hline
+    supported\_modes()  &  Returns the lineage modes $C \subseteq \{Full,$\\
+                        &$Map, Pay, Comp, Blackbox\}$ \\
+    &that the operator can generate. \\ \hline
+
+
+\end{tabular}
+%\end{center}
+\label{t:api}
+\end{table}
+
+
+
+For ease of explanation, this section is described in the context of
+the LSST operator $CRD$ (cosmic ray detection, depicted as A and B in
+Figure~\ref{f:lsstworkflow}) that finds pixels containing cosmic rays
+in a single image, and outputs an array of the same size.  If a pixel
+contains a cosmic ray, the corresponding cell in the output is set to
+$1$, and the output cell depends on the 49 neighboring pixels within a
+3 pixel radius.  Otherwise the output cell is set to $0$, and only
+depends on the corresponding input pixel.  A region pair is denoted
+($outcells$, $incells$).
+
+
+
+\subsection{Lineage Modes}
+
+\sys{} supports four modes of region lineage ({\it Full, Map, Pay, Comp}), and
+one mode  of black-box lineage ({\it Blackbox}).  {\it cur\_modes} is set to
+{\it Blackbox} when the operator does not need to generate any pairs (because
+black box lineage is always in use).  {\it Full} lineage explicitly stores all
+region pairs, and the other lineage modes reduce the amount of lineage that is
+stored by partially computing lineage at query time using developer defined
+mapping functions.  The following sections describe the modes in more detail.
+%\srm{Is full lineage the same as cell lineage?  Confusing because in the
+%previous section we said we supported cell lineage but here we don't talk about
+%cell lineage at all.}
+
+\subsubsection{Full Lineage}
+
+Full lineage ({\it Full}) explicitly represents and stores all region pairs.
+It is straightforward to instrument any operator to generate full lineage.
+The developer simply writes code that generates region pairs and uses
+$lwrite()$ to store the pairs.  For example, in the following CRD pseudocode,
+if $cur\_modes$ contains {\it Full}, the code iterates through each cell in the
+output, calculates the  lineage, and calls $lwrite()$ with lists of cell
+coordinates.  Note that if {\it Full} is not specified, the operator can avoid
+running the lineage related code.
+
+{\footnotesize
+\begin{alltt}
+  def run(image, cur_modes):
+     ...
+     if \(Full \in\) cur_modes:
+       for each cell in output:
+         if cell == 1:
+           neighs = get_neighbor_coords(cell)
+           lwrite([cell.coord], neighs)
+        else:
+           lwrite([cell.coord], [cell.coord])
+\end{alltt}
+}
+
+Although this lineage mode accurately records the lineage data, it is
+potentially very expensive to both generate and store.  We have identified
+several widely applicable operator properties that allow the operators to
+generate more efficient modes of lineage, which we describe next.
+
+
+\subsubsection{Mapping Lineage}
+
+Mapping lineage ({\it Map}) compactly represents an operator's lineage
+using a pair of mapping functions.  Many operators such as matrix transpose
+exhibit a fixed execution structure that does not depend on the input cell
+values.  These operators, called {\it mapping operators}, can compute forward
+and backward lineage from a cell's coordinates and metadata (e.g., input and
+output array sizes) and do not need to access array data values.  This is a
+valuable property because mapping operators do not incur runtime and storage
+overhead.  For example, one-to-one operators, such as matrix addition, are
+mapping operators because an output cell only depends on the input cell at the
+same coordinate, regardless of the value.  Developers implement a pair of
+mapping functions, $map_f(cell, i)/map_b(cell, i)$, that calculate the
+forward/backward lineage of an input/output cell's coordinates, with respect to
+the $i$'th input array.  For example, a 2D transpose operator would implement
+the following functions:
+
+{\footnotesize
+\begin{verbatim}
+  def map_b((x,y), i):   def map_f((x,y), i):
+     return [(y,x)]         return [(y,x)]
+\end{verbatim}
+}
+
+Most SciDB operators (e.g., matrix multiply, join,
+transpose,  convolution) are mapping operators, and we have
+implemented their forward and backward mapping functions.  Mapping
+operators in the astronomy and genomics benchmarks are depicted as
+solid boxes (Figures \ref{f:lsstworkflow} and
+\ref{f:genomicsworkflow}).
+
+\subsubsection{Payload Lineage}
+
+Rather than storing the input cells in each region pair, payload lineage
+({\it Pay}) stores a small amount of data ({\it a payload}), and recomputes the
+lineage using a payload-aware mapping function ($map_p()$). Unlike mapping
+lineage,  the mapping function has access to the user-stored binary
+payload. This mode is particularly useful when the operator has high fanin
+and the payload is very small.  For example, suppose that the radius of
+neighboring pixels that a cosmic ray pixel depends on increases with
+brightness, then  payload lineage only stores the brightness insteall of the
+input cell coordinates.   ({\it Payload operators}) call $lwrite(outcells,
+payload)$ to pass in a list of output cell coordinates and a binary blob,
+and define a {\it payload function}, $map_{p}(outcell, payload,
+i)$, that directly computes the backward lineage of $outcell \in outcells$ from
+the $outcell$ coordinate and the payload.  The result are input cells in the
+$i$'th input array.  As with mapping functions, payload lineage does not need
+to access array data values.  The following pseudocode stores radius values
+instead of input cells:
+
+{\footnotesize
+\begin{alltt}
+  def run(image,cur_modes):
+     ...
+     if \(PAY \in\) cur_modes:
+       for each cell in output:
+         if cell == 1:
+           lwrite([cell.coord], '3')
+         else:
+           lwrite([cell.coord], '0')
+
+  def map_p((x,y), payload, i):
+     return get_neighbors((x,y), int(payload))
+\end{alltt}
+}
+
+In the above implementation, each region pair stores the output cells and an
+additional argument that represents the radius, as opposed to the neighboring
+input cells.  When a backward lineage query is executed, \sys{} retrieves
+the (outcells, payload) pairs that intersect with the query and executes
+$map_p$ on each pair.  This approach is particularly powerful because the
+payload can store arbitrary data -- anything from array data values to
+lineage predicates~\cite{panda}.  Operators D to G in the two benchmarks
+(Figures \ref{f:lsstworkflow} and \ref{f:genomicsworkflow}) are payload
+operators.
+
+Note that payload functions are designed to optimize execution of
+backward lineage queries.  While \sys{} can index the input cells in
+full lineage, the payload is a binary blob that cannot be easily indexed.
+A forward query must iterate through each (outcells, payload) pair and
+compute the input cells using $map_p$ before it can be compared to
+the query coordinates.
+
+\subsubsection{Composite Lineage}
+
+Composite lineage ({\it Comp}) combines mapping and payload
+lineage.  The mapping function defines the default relationship
+between input and output cells, and results of the payload function
+{\it overwrite} the default lineage if specified.    For example, CRD can
+represent the default relationship -- each output cell depends on the
+corresponding input cell in the same coordinate -- using a mapping
+function, and write payload lineage for the cosmic ray
+pixels:
+
+{\footnotesize
+\begin{alltt}
+  def run(image,cur_modes):
+    ...
+    if \(COMP \in\) cur_modes:
+       for each cell in output:
+         if cell == 1:
+          lwrite([cell.coord], 3)
+      // else map_b defines default behavior
+
+  def map_p((x,y), radius, i):
+     return get_neighbors((x,y), radius)
+
+  def map_b((x,y), i):
+     return [(x,y)]
+\end{alltt}
+}
+
+{\it Composite operators} can avoid storing lineage for a significant fraction
+of the output cells.  Although it is similar to payload lineage in that the
+payload cannot be indexed to optimize forward queries, the amount of payload
+lineage that is stored may be small enough that iterating through the small
+number of (outcells, payload) pairs is efficient.  Operators A,B and C in the
+astronomy benchmark (Figure \ref{f:lsstworkflow}) are composite operators.
+
+\subsection{Supporting Operator Re-execution}
+
+An operator stores black-box lineage when $cur\_modes$ equals $Blackbox$.  When
+\sys{} executes a lineage query on an operator that stored black-box lineage,
+the operator is re-executed in tracing mode.   When the operator is re-run at
+lineage query time, \sys{} passes $cur\_modes = Full$, which causes the
+operator to perform $lwrite()$ calls.  The arguments to these calls are sent to
+the query executor.
+
+Rather than re-executing the operator on the full input arrays, \sys{} could
+also reduce the size of the inputs by applying bounding box predicates prior to
+re-execution.  The predicates would reduce both the amount of lineage that
+needs to be stored and the amount of data that the operator needs to
+re-process.  Although we extended both mapping and full operators to compute
+and store bounding box predicates, we did not find it to be a widely useful
+optimization.  During query execution, \sys{} must retrieve the bounding boxes
+for every query cell, and either re-execute the operator for each box, or merge
+the bounding boxes and re-run the operator using the merged predicate.
+Unfortunately, the former approach incurs an overhead on each execution (to
+read the input arrays and apply the predicates) that quickly becomes a significant
+cost.  In the latter approach, the merged bounding box quickly expands to
+encompass the full input array, which is equivalent to completely re-executing
+the operator, but incurs the additional cost to retrieve the predicates.  For
+these reasons, we do not further consider them here.
+
+%performance of bounding box predicates in our
+%experiments.
+
+

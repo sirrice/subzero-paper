@@ -1,0 +1,93 @@
+\section{Static and Query-time Optimizers}
+\label{s:costmodel}
+
+This section describes the formal optimization problem that finds the best
+lineage strategy within fixed space constraints, as well as a query time
+optimization to compensate for errors in the cost models.  
+
+%Due to space
+%constraints, we do not describe the cost models. 
+
+
+
+\subsection{Lineage Strategy Optimizer}
+
+%We now turn to the problem of deciding how to assign {\it storage strategies}
+%(i.e., input and output encodings) to each operator in a workflow prior to
+%executing it.  
+
+The objective is to choose a set of {\it storage strategies} that minimize the
+cost of executing the workflow while keeping storage overhead within
+user-defined constraints.  We formulate the task as an integer programming
+problem, where the inputs are a list of operators, strategy pairs, disk
+overheads, query cost estimates, and a sample workload that is used to derive
+the frequency with which each operator is invoked in the lineage workload.
+Additionally, users can manually specify operator specific strategies prior to
+running the optimizer. 
+
+
+The formal problem description is stated as:
+
+{\footnotesize
+\[
+\begin{array}{l l l}
+\min_x          & \sum_i p_i * \left(\min_{j|x_{ij}=1} q_{ij}\right) +
+&\epsilon * \sum_{ij} (disk_{ij} + \beta * run_{ij}) * x_{ij} \\
+%                &\epsilon * \sum_{ij} disk_{ij} * x_{ij} \\
+\mbox{s.t.}   &\sum_{ij} disk_{ij} * x_{ij} &\leq MaxDISK\\
+              &\sum_{ij} run_{ij} * x_{ij} &\leq MaxRUNTIME\\
+              &\forall_{i} \left(\sum_{0 \leq j < M} x_{ij}\right) &\ge 1\\
+              &\forall_{i,j} x_{ij} &\in \{0, 1\} \\
+&&\\
+              &\hspace*{-.3in}  {\rm user\ specified\ strategies}&\\
+              &x_{ij} = 1 &\forall_{i,j} x_{ij} \in U
+\end{array}
+\]
+}
+
+Here, $x_{ij} = 1$ if operator $i$ stores lineage using strategy $j$, and 0
+otherwise.  $MaxDISK$ is the maximum storage overhead specified by the user;
+$q_{ij}$, $run_{ij}$, and $disk_{ij}$, are the average query cost, runtime
+overhead, and storage overhead costs for operator $i$ using strategy $j$ as
+computed by the cost model.  $p_{ij}$ is the probability that a lineage
+query in the workload accesses operator $i$, and is computed from the sample
+workload.  A single operator may store its lineage data using multiple
+strategies.
+
+The goal of the objective function is to minimize the cost of executing the
+lineage workload.  It prefers strategies that use less storage.  When an
+operator uses multiple strategies to store its lineage, the query processor
+picks the strategy that minimizes the query cost.  The $\min$ statement in the
+left hand term picks the best query performance from the strategies that have
+been picked ($j | x_{ij} = 1$).  The right hand term penalizes strategies that
+take excessive disk space or cause runtime slowdown.  $\beta$ weights runtime
+against disk overhead, and $\epsilon$ is set to a very small value to break
+ties. A large $\epsilon$ is similar to reducing $MaxDISK$ or $MaxRUNTIME$.
+
+We heuristically remove configurations that are clearly non-optimal, such as
+strategies that exceed user constraints, or are not properly indexed for any of
+the queries in the workload (e.g., forward optimized when the workload only
+contains backward queries).  The optimizer also prioritizes operators with
+mapping functions, and picks these over all other classes of lineage.
+
+We solve the ILP problem using the simplex method in GNU Linear Programming
+Kit.  The solver takes about 1ms to solve the problem for the genomics
+benchmark.
+
+
+
+
+\subsection{Query-time Optimizer}
+\label{s:cmopt}
+
+While the lineage strategy optimizer picks the optimal lineage strategy, the
+executor must still pick between accessing the lineage stored by one of the
+lineage strategies, or re-running the operator.  The query-time optimizer
+consults the cost model using statistics gathered during query execution and
+the size of the query result so far to pick the best execution method.  In
+addition, the optimizer monitors the time to access the materialized lineage.
+If it exceeds the cost of re-executing the operator, \sys{} dynamically
+switches to re-running the operator.  This bounds the worst case performance to
+2$\times$ the black-box approach.
+
+

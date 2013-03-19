@@ -1,0 +1,133 @@
+
+\documentclass[10pt,conference,letterpaper]{ieee}
+\usepackage{graphicx}
+\usepackage{graphics}
+\usepackage{colortbl}
+\usepackage[noend]{algorithm2e}
+\usepackage{amsmath}
+\usepackage{algorithmic}
+\usepackage[tight]{subfigure}
+\usepackage{array}
+\usepackage{url}
+\usepackage{alltt}
+\usepackage{paralist}
+\usepackage{afterpage}
+\usepackage{float}
+%\usepackage[T1]{fontenc}
+%\usepackage{times}
+
+
+%\usepackage{caption}
+
+\renewcommand{\textfraction}{0.07}	% allow minimal text w. figs
+
+
+\def\compactify{\itemsep=0pt \topsep=0pt \partopsep=0pt \parsep=0pt}
+\let\latexusecounter=\usecounter
+\newenvironment{CompactItemize}
+  {\def\usecounter{\compactify\latexusecounter}
+   \begin{itemize}}
+  {\end{itemize}\let\usecounter=\latexusecounter}
+\newenvironment{CompactEnumerate}
+  {\def\usecounter{\compactify\latexusecounter}
+   \begin{enumerate}}
+  {\end{enumerate}\let\usecounter=\latexusecounter}
+
+\newcommand{\sys}{SubZero{}}
+\newcommand{\red}[1]{\textcolor{red}{#1}}
+\newcommand{\srm}[1]{\textcolor{red}{SRM: #1}}
+\title{\sys{}: A Fine-Grained Lineage System for Scientific Databases}
+
+
+\author{%
+{Eugene Wu, Samuel Madden, Michael Stonebraker }
+% add some space between author names and affils
+\vspace{1.6mm}\\
+\fontsize{10}{10}\selectfont\itshape
+CSAIL, MIT\\
+32 Vassar St, Cambridge, MA, USA 02139\\
+\fontsize{9}{9}\selectfont\ttfamily\upshape
+\{sirrice, madden, stonebraker\}@csail.mit.edu
+}
+
+
+%\restylefloat{figure}
+%\restylefloat{table}
+\setlength{\textfloatsep}{0pt}
+\setlength{\floatsep}{0pt}
+\setlength{\dbltextfloatsep}{10pt}
+\setlength{\dblfloatsep}{0pt}
+%\setlength{\abovecaptionskip}{0pt}
+%\setlength{\belowcaptionskip}{0pt}
+
+\begin{document}
+
+\maketitle
+\begin{abstract}
+
+
+Data lineage is a key component of provenance that helps scientists  track and query
+relationships between input and output data.  While current systems readily
+support lineage relationships at the file or data array level, finer-grained
+support at an array-cell level is impractical due to the lack of support
+for user defined operators and the high runtime and storage overhead to store
+such lineage.
+
+
+We interviewed scientists in several domains to identify a set of common
+semantics that can be leveraged to efficiently store fine-grained lineage.  We
+use the insights to define lineage representations that efficiently capture
+common locality properties in the lineage data, and a set of APIs so operator
+developers can easily export lineage information from user defined operators.
+Finally, we introduce two benchmarks derived from astronomy and genomics, and
+show that our techniques can reduce lineage query costs by up to 10$\times$
+while incuring substantially less impact on workflow runtime and storage.
+
+
+%Provenance refers to the process of determining which inputs contributed
+%to a particular output in a database query or scientific workflow.
+%It is important in a number of debugging and exploratory development
+%settings, and has been identified as a key requirement of next generation
+%data management systems, particularly those focused on scientific use-cases
+%where workflows can be very complex.
+%
+%In this paper, we present \sys{}, a provenance system for the SciDB
+%scientific database system.  \sys{} builds on prior provenance systems
+%by exploiting the semantics of scientific operations to efficiently
+%encode provenance information, and provides an API for developers to
+%record the provenance of their user-defined operators. \sys{} uses an
+%optimization framework to select from several different methods of
+%storing provenance, while respecting user-specified space and time
+%constraints on the cost of recording provenance.  Two
+%benchmarks derived from astronomy and genetics show that these
+%optimizations make \sys{} up to 10$\times$ faster at executing a
+%provenance query workload than a system that records fine-grained provenance
+%between individual data items, while having substantially less impact
+%on workflow runtime and requiring much less storage.
+
+
+
+\end{abstract}
+
+
+\input{Intro}
+\input{UseCases}
+\input{Arch}
+\input{DataModel}
+\input{StorageModel}
+\input{Implementation}
+\input{Optimizer}
+\input{Experiments}
+\input{Related}
+\input{Conclusion}
+
+
+%\vfill
+\bibliographystyle{ieee}
+{\scriptsize
+\bibliography{main}
+}
+
+
+\end{document}
+

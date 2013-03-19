@@ -1,0 +1,98 @@
+\section{Provenance Storage Model}
+
+This is an attempt to formalize the types of provenance storage systems that I’ve implemented. We first focus on the model to support writing and executing backward provenance queries, describe how the developer interacts with the model, augment the model with support for query reexecution based strategies, and finally extend support toward forward provenance queries.
+Section XXX describes the implementations and compression techniques in each storage class.
+note: I should have already described the workflow model at this point.
+
+The provenance storage model is separated into three classes represented in Figure 1.1. In each of the subfigures, the arrow represents the provenance relationship between the input and output cells, the left circle represents the input cells, and the right of the arrow are the output cells. f ∗ () represents a function provided by the programmer, while the cylinder represents explicitly stored data. The subfigures depict how the relationship and output cell information is stored. Each subsequent subfigure is more expensive to capture and query provenance.
+
+Figure 1.1.1 depicts storage class 1, a mapping function based provenance. f cell() defines the set of output cells that the mapping function is valid for (for most mapping based operators, the function returns True for all output cells), and f rel() then returns the coordinates of the input cells, using only the coordinates of the output cell as input. This storage class does not require storage space.
+
+Figure 1.1.2 shows storage class 2, outputs and stores output cell data, but still computes the provenance information using a mapping function. There are two main cases where this is useful: first, if the cells cannot cannot be easily described using a function (f cell), or second, if f rel() requires more information than the output coordinates to compute the provenance. Each object stored in obj contains 1 or more output coordinates, and an optional binary blob payload that contains enough information for f rel() to return accurate provenance. The coordinates are compressed, and the payload is stored as a binary blob. The payload is typically small, but can contain anything from the output cells’ data values, to predicates seen in [?, ?].
+
+Figure 1.1.3 shows storage class 3, stores both output cell coordinates as well as the relationship information explicitly. The storage class is physically similar to storage class 2 (relationship information is stored in the payload field of storage class 2), but the payload is structured, and can be efficiently compressed.
+
+As the workflow is executed, the runtime picks a storage manager from one of the classes each operator.
+Finally, we note that nearly all SciDB operators, such as Filter, Join, and Reshape, fall into storage class 1, and can be efficiently evaluated. Other operators, such as Redimension and Merge, can be implemented using storage class 2.
+
+
+\subsection{Re-Execution Storage Classes}
+
+Often times, if the fanin or fanout of an operator is very high, storing all of the input and output coordinates can incur substantial storage and runtime overhead. This overhead can be reduced by storing boundary boxes rather than the full set of corrdinates. The precise provenance can then be recovered by re-executing the operator in “provenance capture” mode on the subsets of the input. Thus, the optimization can only be enabled if the developer implements support for storage class 3.
+
+To re-execute the operator, the system first adds a mask that sets the values of all cells not in the bounding boxes to null, then assigns the operator an instrumented storage manager in storage class 3. The storage manager filters the provenance by the query and directly outputs the provenance, rather than writing it on disk.
+
+Storage classes 1 and 2 can implement a function f box(), analagous to f rel(), that returns bounding boxes. Storage class 3 has a compression scheme that stores bounding boxes instead of explicit coordinates.
+
+By default, the bounding boxes cover the full input arrays. In this case, Calculating provenance by re-executing an operator with the complete set of original inputs is always correct, however this may not be the case when executing on a subset region due to two possibilities:
+
+\begin{CompactEnumerate}
+\item The bounding box contains cells that do not contribute to the forward provenance of C, thus may generate irrelevant output
+\item A cell C within the bounding box may have a fanout $>$ 1 (e.g., contribute to output cells (o1,...,on)), however the set of cells in the bounding box are only sufficient to reproduce a subset of the output cells O ⊂ (o1, ..., on).
+\end{CompactEnumerate}
+
+Additionally, when an operator takes multiple inputs, a forward provenance query cannot be executed in a straight forward fashion. Consider RemoveCRs, which takes two inputs I0, I1, of the same size, and a forward query forward(RemoveCRs,c ∈ I0) that queries for the output cells where c is in its provenance. If the system uses the bounding box strategy, the naive execution would extract the relevant subset I0′ ⊂ I0 for each bounding box, and re-execute the operator RemoveCRs(I0′ , I1). However, RemoveCRs expects two arrays of the same shape, so this execution would cause an execution error.
+
+
+The proper execution must reduce the sizes of all inputs (e.g., I1′ ⊂ I1), re-execute the operator, capture the provenance, and map the provenance information back to the coordinates of the original inputs.
+
+\subsection{Composable Storage Models}
+
+The storage classes store more data as the class number (1,2,3) increases. The system is designed to compress within each storage class, but can also do so across . Often, operators generate a large number of redundant provenance information with a small number of exceptions. For example, the Cosmic Ray Detection algorithm, by default, maps each input cell to the corresponding output cell. However, for the output cells where cosmic rays are detected, the provenance is the set of immediately neighboring cells (to a first approximation).
+
+To deal with these operators, We allow storage systems from each of the three classes to be composed together, such that high class numbers augment the provenance described by lower class numbers. In the case of Cosmic Ray Detection, the developer would define mapping functions for the default mapping in storage class1, and write provenance of cosmic ray cells in storage class 2.
+
+
+\subsection{Support for Forward Queries}
+
+So far, we have described models for implementing backward provenance queries. In this subsection, we address how to extend the model to support forward queries as well.
+In storage class 1, we can extend support with a forward mapping function that takes an input coordinate, and returns the output cells that it affects.
+
+In storage class 2, the output coordinates and payload often contain enough information to calculate the forward provenance. If that is not the case, the system can compute the backward provenance of each output/payload combination and return the output coordinates whose backward provenance match the query.
+
+In storage class 3, the pointers are written explicitly, so the system can iterate through and find the matching pointers.
+
+
+
+
+\subsection{API}
+
+By default, the system assumes UDFs are all-to-all operators. Developers interact with the storage classes by overriding mapping functions in the operator, and calling the Runtime API to explicitly write provenance data.
+The mapping functions are described in table~\ref{t.api}. Each mapping function has access to the operator’s input and output metadata (array shapes).
+In addition, the runtime system exposes a small set of system functions that operators can call to write provenance explicitly.
+\begin{CompactEnumerate}
+\item storage mode(): returns what kind of storage class the runtime is implementing
+\item write prov(outcoords, payload): API for storage class 2.
+\item write prov(outcoords, incoords1, ..., incoords n): API for storage class 3. incoordsi are the cells in input array i that is the provenance of outcoords.
+\end{CompactEnumerate}
+
+
+
+
+\begin{table}
+\label{t:api}
+\begin{center}
+  \begin{tabular}{ l | l   }
+    \multicolumn{2}{|c|}{Implemented in all operators} \\ \hline
+    validmodes() &  The operator returns the set of storage classes (including composite)  \\
+                         & that the operator supports. \\ \hline
+   outputshape() &returns the shape of the output array  \\ \hline
+   \multicolumn{2}{|c|]{Storage class 1} \\ \hline
+    bmap(outcoord, $input_i$) & backward mapping function that returns the coordinates of input cells \\
+                                         & in $input_i$ array that are\\
+                                         & the provenance of outcoord. \\ \hline
+   fmap(incoord, $input_i$) & forward mapping function that returns the coordinates \\
+                                           & of output cells affected by $incoord \in input_i$. \\ \hline
+   bbox(outcoord, $input_i$) & given an output coord, returns the bounding box containing \\
+                                             & the inputs that can recompute the output cell.\\
+                                             & Defaults to the entire input array \\ \hline
+   \multicolumn{2}{|c|}{Storage class 2} \\ \hline
+   bmap(outcoords, payload, $input_i$) & same as above \\ \hline
+   fmap(outcoords, payload, $input_i$) & same as above \\ \hline
+   bbox(outcoords, payload, $input_i$) & same as above \\ \hline
+ \end{tabular}
+\end{center}
+\caption{APIs}
+\vspace*{-0.2in}
+\end{table}
+
